@@ -1,53 +1,11 @@
-import openai
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
-# from sklearn.ensemble import GradientBoostingRegressor  # Example ML model
-from io import StringIO
-from pydantic import BaseModel, ValidationError
-import json
+import requests
+from utils import get_analysis, generate_analysis, Response, BACKEND_URL
+from dotenv import load_dotenv
+import os
 
-class Response(BaseModel):
-    total_after_suggestions: str
-    allocations: dict  # Keys are categories, values are suggested amounts/details
-    risk_score: int
-    risks: list  # A list of risk descriptions
-    recommendations: list  # A list of actionable recommendations
-
-def generate_analysis(financial_data, goals, industry):
-    openai.api_key = "sk-XXXXXXXX"
-
-    prompt = f"""
-    Based on the following financial data, business goals, and industry, provide a detailed analysis in JSON format.
-    
-    Financial Data:
-    - Total Money In: ${financial_data['money_in']:,}
-    - Total Money Out: ${financial_data['money_out']:,}
-    - Current Cash Reserves: ${financial_data['cash_reserves']:,}
-    - Current Debt: ${financial_data['debt']:,}
-    
-    Business Goals:
-    {goals}
-    
-    Industry:
-    {industry}
-    
-    Respond with a JSON object containing:
-    - "total_after_suggestions": Total finances after implementing the recommendations.
-    - "allocations": A dictionary where keys are categories (e.g., Marketing, Operations, Debt Repayment) and values are suggested amounts or details.
-    - "risk_score": An integer between 0-100 indicating the overall financial risk (0 = no risk, 100 = critical risk).
-    - "risks": A list of potential risks identified.
-    - "recommendations": A list of detailed, actionable recommendations to mitigate risks.
-    """
-
-    response = openai.Completion.create(
-        engine="text-davinci-003",
-        prompt=prompt,
-        max_tokens=700,
-        temperature=0.7
-    )
-    
-    return response['choices'][0]['text'].strip()
+# Load environment variables
+load_dotenv()
 
 # Initialize the app
 st.set_page_config(page_title="Interactive Financial Tool", layout="wide")
@@ -61,36 +19,14 @@ st.markdown("""
 """)
 
 st.subheader("Quick Survey")
-st.text_area("ADD SURVEY QUESTIONS HERE")
+survey_responses = st.text_area("ADD SURVEY QUESTIONS HERE", placeholder="Enter your responses here...")
 
 # Upload Data
 st.subheader("Upload Your Financial Data")
-uploaded_file = st.file_uploader("Upload CSV or Excel File", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload CSV/Excel or img", type=["csv", "xlsx", "jpg", "png"])
 
 if uploaded_file:
     try:
-        if uploaded_file.name.endswith(".csv"):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
-        
-        st.success("File Uploaded Successfully!")
-        st.write("Preview of Uploaded Data:")
-        st.dataframe(df.head())
-
-        # Visualization
-        # st.header("Data Visualization")
-        # st.subheader("Revenue Trend")
-        # if "Revenue" in df.columns:
-        #     fig, ax = plt.subplots()
-        #     ax.plot(df["Revenue"], label="Revenue Trend")
-        #     ax.set_xlabel("Time")
-        #     ax.set_ylabel("Revenue")
-        #     ax.legend()
-        #     st.pyplot(fig)
-        # else:
-        #     st.warning("No 'revenue' column found in data.")
-
         money_in = 100
         money_out = 100
         cash_reserves = 100
@@ -105,6 +41,13 @@ if uploaded_file:
                 st.error("Please enter your business goals.")
             else:
                 with st.spinner("Processing data..."):
+                    response = get_analysis(uploaded_file)
+                    if response.status_code == 200:
+                        print("yay!")
+                        print(response.json())
+                    else:
+                        print("error!")
+
                     financial_data = {
                         "money_in": money_in,
                         "money_out": money_out,
@@ -112,10 +55,8 @@ if uploaded_file:
                         "debt": debt
                     }
                     
-                    combined_response = generate_analysis(financial_data, goals, industry)
-                    
                     try:
-                        parsed_response = Response.model_validate_json(combined_response)
+                        parsed_response = Response.model_validate_json(response)
                         
                         col1, col2 = st.columns(2)
                         
@@ -145,9 +86,7 @@ if uploaded_file:
                             st.write(f"- {recommendation}")
                     except ValidationError as e:
                         st.error("Failed to parse the API response. Please try again.")
-                        st.text_area("Raw Combined Response", combined_response)
-
-#            st.markdown(f"<div style='border: 1px solid white; padding: 50px; text-align: center;'>{suggestions}</div>", unsafe_allow_html=True)
+                        st.text_area("Raw Combined Response", response)
         
         def calculate_kpis():
             st.write("Calculation logic goes here.")
@@ -183,6 +122,5 @@ if uploaded_file:
                 col.markdown("<div style='border: 1px solid white; padding: 20px; text-align: center;'>Current KPIs<br><br>New KPIs</div>", unsafe_allow_html=True)
             st.markdown("<br>", unsafe_allow_html=True)
 
-        
     except Exception as e:
         st.error("Error reading the file. Please check the format.")
